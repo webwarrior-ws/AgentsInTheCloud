@@ -770,10 +770,12 @@ async function initialize() {
             (connectionState === "NeedsLogin" || connectionState === "Stopped")) {
           connectionAttempt = "running";
           // The browser sign-in is the user's consent; generating its URL does
-          // not connect an account. System owns this command and its deadline.
+          // not connect an account. An installer-provided TS_AUTHKEY consents
+          // the same way. System owns this command and its deadline.
           const attempt = new AbortController();
           login = attempt;
-          void command(["tailscale", "up", "--timeout=10m"], log, 610_000, attempt.signal)
+          const authKey = process.env.TS_AUTHKEY;
+          void command(["tailscale", "up", ...(authKey ? [`--auth-key=${authKey}`] : []), "--timeout=10m"], log, 610_000, attempt.signal)
             .catch((error) => {
               if (!tailscaleSelected() || attempt.signal.aborted) return;
               connectionFailure = `Could not connect AgentsInTheCloud: ${String(error)}`;

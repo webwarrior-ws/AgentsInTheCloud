@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 const installer = await Bun.file(new URL("./install.sh", import.meta.url)).text();
 
-function run(options: { systemState?: "restarting" | "exited"; nonRoot?: boolean; denySudo?: boolean; mac?: boolean; wsl?: boolean; installed?: boolean; old?: boolean; legacyAtelier?: boolean; legacyVolumeOnly?: boolean; legacyPreSystem?: boolean; legacyDownloadFails?: boolean; legacyDelegateFails?: boolean; pullFails?: boolean; pullDenied?: boolean; appFails?: boolean; retryUpdateRequest?: boolean; rejectUpdateRequest?: boolean; pendingHealth?: boolean; missingFilesystem?: boolean; loadable?: boolean; uninstallAnswer?: string; uninstallFails?: boolean; uninstallRequestFails?: boolean; inventoryFails?: boolean; volumeOnly?: boolean; volumeRemovalFails?: boolean; initiallyStopped?: boolean; channel?: string; systemRepository?: string } = {}, args: string[] = []) {
+function run(options: { systemState?: "restarting" | "exited"; nonRoot?: boolean; denySudo?: boolean; mac?: boolean; wsl?: boolean; installed?: boolean; old?: boolean; legacyAtelier?: boolean; legacyVolumeOnly?: boolean; legacyPreSystem?: boolean; legacyDownloadFails?: boolean; legacyDelegateFails?: boolean; pullFails?: boolean; pullDenied?: boolean; appFails?: boolean; retryUpdateRequest?: boolean; rejectUpdateRequest?: boolean; pendingHealth?: boolean; missingFilesystem?: boolean; loadable?: boolean; uninstallAnswer?: string; uninstallFails?: boolean; uninstallRequestFails?: boolean; inventoryFails?: boolean; volumeOnly?: boolean; volumeRemovalFails?: boolean; initiallyStopped?: boolean; channel?: string; systemRepository?: string; authKey?: string } = {}, args: string[] = []) {
   const logPath = `/tmp/agents-in-the-cloud-install-test-${crypto.randomUUID()}.log`;
   const mock = `
 mktemp() { if [[ "$*" == *atelier-legacy-uninstall* ]]; then echo "${logPath}.legacy"; else echo "${logPath}"; fi; }
@@ -91,7 +91,13 @@ docker() {
       'IFS= read -r -t 120 "$1" <"$prompt_input"',
       `if [ "$1" = action ]; then action=update; else answer=${JSON.stringify(options.uninstallAnswer ?? (options.installed ? "yes" : "1"))}; fi`,
     );
-  const result = Bun.spawnSync([process.platform === "darwin" ? "/bin/bash" : "bash", "-c", mock + script, "installer", ...args], { stdin: "ignore" });
+  const environment = { ...process.env };
+  delete environment.TS_AUTHKEY;
+  if (options.authKey) environment.TS_AUTHKEY = options.authKey;
+  const result = Bun.spawnSync([process.platform === "darwin" ? "/bin/bash" : "bash", "-c", mock + script, "installer", ...args], {
+    stdin: "ignore",
+    env: environment,
+  });
   const log = Bun.spawnSync(["cat", logPath]).stdout.toString();
   Bun.spawnSync(["rm", "-f", logPath, `${logPath}.checked`, `${logPath}.update-attempted`, `${logPath}.update-accepted`, `${logPath}.container-removed`, `${logPath}.volume-removed`]);
   return { status: result.exitCode, output: result.stdout.toString() + result.stderr.toString() + log };
@@ -109,6 +115,15 @@ test("fresh install launches privileged System with persistent named volume and 
   expect(result.output).toContain("--name agents-in-the-cloud-system --hostname agents-in-the-cloud-system --privileged --cgroupns=host --restart unless-stopped --stop-timeout 120 --tmpfs /run --mount source=agents-in-the-cloud-system,target=/data --publish 127.0.0.1:3080:3080 test/system:v1 --app-image test/app:v1 --access-mode tailscale");
   expect(result.output).not.toContain("DOCKER stop");
   expect(result.output).toContain("DOCKER exec agents-in-the-cloud-system bun -e");
+});
+
+test("TS_AUTHKEY reaches the System container only when set", () => {
+  const withKey = run({ authKey: "tskey-auth-example" }, ["--system-image", "test/system:v1", "--app-image", "test/app:v1"]);
+  expect(withKey.status).toBe(0);
+  expect(withKey.output).toContain("-e TS_AUTHKEY");
+  const withoutKey = run({}, ["--system-image", "test/system:v1", "--app-image", "test/app:v1"]);
+  expect(withoutKey.status).toBe(0);
+  expect(withoutKey.output).not.toContain("TS_AUTHKEY");
 });
 
 test("new installations start System on latest without reading a channel", () => {
