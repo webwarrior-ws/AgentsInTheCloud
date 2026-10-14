@@ -133,6 +133,8 @@ Update also installs the newest AgentsInTheCloud app on the installation's selec
 
 The app image is only used when System has no persisted app selection.
 There is no migration from the previous AgentsInTheCloud installation layout.
+
+Set TS_AUTHKEY to join Tailscale without the interactive browser sign-in.
 HELP
 }
 
@@ -620,8 +622,11 @@ case "$action" in
       run_quiet "Replacing AgentsInTheCloud services" docker rm "$system_name"
     fi
     stop_on_failure=1
+    authkey_env=()
+    if [ -n "${TS_AUTHKEY:-}" ]; then authkey_env=(-e TS_AUTHKEY); fi
     run_quiet "Starting AgentsInTheCloud services" docker run -d --name "$system_name" --hostname agents-in-the-cloud-system --privileged --cgroupns=host --restart unless-stopped \
       --stop-timeout 120 --tmpfs /run --mount source=agents-in-the-cloud-system,target=/data --publish 127.0.0.1:3080:3080 \
+      "${authkey_env[@]+"${authkey_env[@]}"}" \
       "$system_image" --app-image "$app_image" --access-mode "${access_mode:-tailscale}"
     ;;
   connect)
