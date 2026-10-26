@@ -1,4 +1,4 @@
-name: Publish default workspace image
+name: Publish default workspace and system images
 
 on:
   push:
@@ -16,7 +16,6 @@ concurrency:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/rename-agents-in-the-cloud'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -102,3 +101,42 @@ jobs:
           fi
           docker buildx imagetools create --tag "$ALIAS" "$IMAGE@$digest"
           echo "Published $IMAGE and $ALIAS" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare System image build artifacts
+        id: system-image
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          bun install --cwd images/system --frozen-lockfile
+          bun images/system/build.ts
+          system_version=$(bun -e 'import { systemVersion } from "./packages/shared/src/system-version.ts"; console.log(systemVersion)')
+          repository="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/agents-in-the-cloud-system"
+          revision="${{ github.sha }}"
+          {
+            echo "ref=$repository:sha-$revision"
+            echo "alias=$repository:latest"
+            echo "system_version=$system_version"
+            echo "revision=$revision"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push System image
+        uses: docker/build-push-action@v6
+        with:
+          context: images/system
+          file: images/system/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.system-image.outputs.ref }}
+            ${{ steps.system-image.outputs.alias }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.image.outputs.revision }}
+            org.agents-in-the-cloud.system-version=${{ steps.image.outputs.system_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summarize System image publication
+        run: |
+          echo "Published ${{ steps.image.outputs.ref }} and ${{ steps.image.outputs.alias }}" >> "$GITHUB_STEP_SUMMARY"
